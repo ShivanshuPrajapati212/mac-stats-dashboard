@@ -1,15 +1,13 @@
 package ws
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"time"
+	"os"
+	"os/exec"
 
+	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/process"
 )
 
 var upgrader = websocket.Upgrader{
@@ -18,48 +16,33 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-type Message struct {
-	CPU      float64 `json:"cpu"`
-	TotalRAM float64 `json:"total_ram"`
-	UsedRAM  float64 `json:"used_ram"`
-}
-
-func WsHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func HandleWS(w http.ResponseWriter, r *http.Request) {
+	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Upgrade error:", err)
+		log.Println("upgrade error:", err)
 		return
 	}
-	defer conn.Close()
+	defer ws.Close()
 
+	cmd := exec.Command("btop")
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
+	if err != nil {
+		log.Println("pty error:", err)
+		return
+	}
+	defer f.Close()
+	defer cmd.Wait()
+
+	buf := make([]byte, 4096)
 	for {
-		cpuPercent, _ := cpu.Percent(0, false)
-		memStats, _ := mem.VirtualMemory()
-
-		stats := Message{CPU: cpuPercent[0], TotalRAM: float64(memStats.Total), UsedRAM: float64(memStats.Used)}
-
-		err = conn.WriteJSON(stats)
+		n, err := f.Read(buf)
 		if err != nil {
-			log.Println("Write error:", err)
 			break
 		}
-
-		time.Sleep(1 * time.Second)
-	}
-}
-
-func getProcessByName(name string) (*process.Process, error) {
-	processes, err := process.Processes()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, p := range processes {
-		n, _ := p.Name()
-		if n == name {
-			return p, nil
+		if err := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+			break
 		}
 	}
-
-	return nil, fmt.Errorf("process not found")
 }

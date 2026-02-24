@@ -12,7 +12,7 @@ func SetupHandlers() {
 		fmt.Fprint(w, "Hello Dashboard")
 	})
 
-	http.HandleFunc("/ws", ws.WsHandler)
+	http.HandleFunc("/ws", ws.HandleWS)
 
 	http.ListenAndServe(":42067", nil)
 }
