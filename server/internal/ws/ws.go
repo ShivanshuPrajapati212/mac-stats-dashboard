@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -30,7 +31,6 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	// Wait for the first message containing window size
 	_, msg, err := ws.ReadMessage()
 	if err != nil {
 		log.Println("read size error:", err)
@@ -59,14 +59,30 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	defer cmd.Wait()
 
-	buf := make([]byte, 4096)
+	var (
+		buf    = make([]byte, 4096)
+		chunk  []byte
+		ticker = time.NewTicker(5 * time.Second)
+	)
+	defer ticker.Stop()
+
+	go func() {
+		for range ticker.C {
+			if len(chunk) == 0 {
+				continue
+			}
+			if err := ws.WriteMessage(websocket.BinaryMessage, chunk); err != nil {
+				return
+			}
+			chunk = nil
+		}
+	}()
+
 	for {
 		n, err := f.Read(buf)
 		if err != nil {
 			break
 		}
-		if err := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-			break
-		}
+		chunk = append(chunk, buf[:n]...)
 	}
 }
