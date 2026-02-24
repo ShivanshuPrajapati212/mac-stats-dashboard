@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type WindowSize struct {
+	Width  uint16 `json:"width"`
+	Height uint16 `json:"height"`
+}
+
 func HandleWS(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -24,10 +30,28 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	// Wait for the first message containing window size
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		log.Println("read size error:", err)
+		return
+	}
+
+	var size WindowSize
+	if err := json.Unmarshal(msg, &size); err != nil {
+		log.Println("invalid size message:", err)
+		return
+	}
+
+	log.Printf("client window: %dx%d\n", size.Width, size.Height)
+
 	cmd := exec.Command("btop")
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
+	f, err := pty.StartWithSize(cmd, &pty.Winsize{
+		Cols: size.Width,
+		Rows: size.Height,
+	})
 	if err != nil {
 		log.Println("pty error:", err)
 		return
